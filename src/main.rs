@@ -53,6 +53,7 @@ use embedded_svc::sys_time::SystemTime;
 use embedded_svc::timer::TimerService;
 use embedded_svc::timer::*;
 use embedded_svc::wifi::*;
+use embedded_svc::ws::*;
 
 use esp_idf_svc::eth::*;
 use esp_idf_svc::eventloop::*;
@@ -68,6 +69,7 @@ use esp_idf_svc::sysloop::*;
 use esp_idf_svc::systime::EspSystemTime;
 use esp_idf_svc::timer::*;
 use esp_idf_svc::wifi::*;
+use esp_idf_svc::ws::client::{EspWebSocketClient, EspWebSocketClientConfig, WebSocketEventType};
 
 use esp_idf_hal::adc;
 use esp_idf_hal::delay;
@@ -275,6 +277,8 @@ fn main() -> Result<()> {
     let mqtt_client = test_mqtt_client()?;
 
     let _timer = test_timer(eventloop, mqtt_client)?;
+
+    test_websocket();
 
     #[cfg(feature = "experimental")]
     experimental::test()?;
@@ -666,6 +670,47 @@ fn test_mqtt_client() -> Result<esp_idf_svc::mqtt::client::EspMqttClient> {
     info!("Published a hello message to topic \"rust-esp32-std-demo\"");
 
     Ok(client)
+}
+
+fn test_websocket() {
+    info!("WebSocket: Testing WebSocket functionality");
+
+    let conf = EspWebSocketClientConfig {
+        uri: Some("ws://192.168.178.31:5000/"),
+        ..Default::default()
+    };
+
+    let (mut client, mut connection) =
+        EspWebSocketClient::new(conf, std::time::Duration::from_secs(5))
+            .expect("Unable to instantiate EspWebSocketClient");
+
+    thread::spawn(move || {
+        info!("WebSocket: Spawned new thread to wait for new messages from the server");
+        while let Some(event) = connection.next() {
+            if let Err(e) = event {
+                warn!("WebSocket: Error: {}", e);
+                continue;
+            }
+
+            let event = event.unwrap();
+            match &event.event_type {
+                WebSocketEventType::Connected => info!("WebSocket: Connected to host!"),
+                WebSocketEventType::Disconnected => info!("WebSocket: Disconnected from the host!"),
+                WebSocketEventType::Close(d) => info!("WebSocket: Received Close frame: {:?}", d),
+                WebSocketEventType::Closed => info!("WebSocket: Closed the connection!"),
+                WebSocketEventType::Text(d) => info!("WebSocket: received text: {}", d),
+                WebSocketEventType::Binary(d) => info!("WebSocket: received binary: {:?}", d),
+            }
+        }
+    });
+
+    let data = "Hello, WebSocket!";
+    info!("WebSocket: about to send message \"{}\"", data);
+    if let Err(e) = client.send(FrameType::Text(false), Some(data.as_bytes())) {
+        warn!("Unable to send message: {:?}", e);
+    } else {
+        info!("WebSocket: Published message \"Hello, Websocket!\"");
+    }
 }
 
 #[cfg(feature = "experimental")]
